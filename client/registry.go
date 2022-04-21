@@ -54,7 +54,7 @@ func NewRegistryClient(client *http.Client, secure bool, host string, port int, 
 
 func (client *RegistryClient) Repositories() ([]string, error) {
 	var data repositoriesResult
-	if err := client.request("GET", "/_catalog", nil, &data); err != nil {
+	if _, err := client.Request("GET", "/_catalog", nil, &data); err != nil {
 		return []string{}, err
 	}
 
@@ -62,10 +62,11 @@ func (client *RegistryClient) Repositories() ([]string, error) {
 }
 
 func (client *RegistryClient) tryConnect() error {
-	return client.request("HEAD", "/", nil, nil)
+	_, err := client.Request("HEAD", "/", nil, nil)
+	return err
 }
 
-func (client *RegistryClient) request(method string, endpoint string, body io.Reader, data interface{}) error {
+func (client *RegistryClient) Request(method string, endpoint string, body io.Reader, data interface{}) (http.Header, error) {
 	protocol := "http"
 	if client.secure {
 		protocol = "https"
@@ -73,7 +74,7 @@ func (client *RegistryClient) request(method string, endpoint string, body io.Re
 
 	req, err := http.NewRequest(method, fmt.Sprintf("%s://%s:%d/v2%s", protocol, client.host, client.port, endpoint), body)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	isGetOrHead := false
@@ -86,20 +87,20 @@ func (client *RegistryClient) request(method string, endpoint string, body io.Re
 	}
 
 	if isGetOrHead && body != nil {
-		return errors.New("cannot append `body` to GET/HEAD requests")
+		return nil, errors.New("cannot append `body` to GET/HEAD requests")
 	}
 
 	if client.auth != nil {
 		auth := *client.auth
 		err = auth.Configure(req.Header)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	res, err := client.client.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	defer res.Body.Close()
@@ -108,25 +109,25 @@ func (client *RegistryClient) request(method string, endpoint string, body io.Re
 		buf := &bytes.Buffer{}
 
 		if _, err := io.Copy(buf, res.Body); err != nil {
-			return err
+			return res.Header, err
 		}
 
-		return fmt.Errorf("received %d, not 200 :: %s", res.StatusCode, buf.String())
+		return res.Header, fmt.Errorf("received %d, not 200 :: %s", res.StatusCode, buf.String())
 	}
 
 	// Convert the data to JSON, if any
 	contentType := res.Header.Get("Content-Type")
 	if contentType == "" && data != nil {
-		return errors.New("missing `content-type` header but data to deserialise was provided")
+		return res.Header, errors.New("missing `content-type` header but data to deserialise was provided")
 	}
 	
 	if data != nil {
 		if contentType != "" && strings.HasPrefix(contentType, "application/json") {
 			if err := json.NewDecoder(res.Body).Decode(&data); err != nil {
-				return err
+				return res.Header, err
 			}
 		}
 	}
 
-	return nil
+	return res.Header, nil
 }

@@ -14,3 +14,20 @@
 // limitations under the License.
 
 package auth
+
+import "net/http"
+
+type SillyAuth struct {}
+
+func NewSillyAuth(username string, password string) BaseAuth {
+	return &SillyAuth{}
+}
+
+func (*SillyAuth) Name() string {
+	return "basic authentication with username + password"
+}
+
+func (*SillyAuth) Configure(headers http.Header) error {
+	headers.Add("Authorization", "booping fluffs")
+	return nil
+}

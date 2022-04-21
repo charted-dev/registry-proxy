@@ -13,34 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package auth
+package client
 
-import (
-	"encoding/base64"
-	"fmt"
-	"net/http"
-)
+import "net/http"
 
-type BasicAuth struct {
-	Username string
-	Password string
-}
-
-func NewBasicAuth(username string, password string) BaseAuth {
-	return &BasicAuth{
-		Username: username,
-		Password: password,
-	}
-}
-
-func (*BasicAuth) Name() string {
-	return "basic authentication with username + password"
-}
-
-func (b *BasicAuth) Configure(headers http.Header) error {
-	u := base64.StdEncoding.EncodeToString([]byte(b.Username))
-	p := base64.StdEncoding.EncodeToString([]byte(b.Password))
-
-	headers.Add("Authorization", fmt.Sprintf("Basic %s:%s", u, p))
-	return nil
+type Response struct {
+	StatusCode int
+	Header http.Header
+	Inner *http.Request
 }
