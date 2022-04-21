@@ -50,12 +50,12 @@
 package registryproxy
 
 import (
-	"bytes"
-	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strconv"
+
+	"github.com/charted-dev/registry-proxy/auth"
+	"github.com/charted-dev/registry-proxy/client"
 )
 
 // Options represents the base options for the proxy itself.
@@ -69,7 +69,7 @@ type Options struct {
 	Port int
 
 	// Represents the authentication type. Uses `nil` as the default.
-	Auth *Auth
+	Auth *auth.BaseAuth
 
 	// If the server is secured by HTTPS, which will use `https://` instead
 	// of `http://`
@@ -80,63 +80,8 @@ type Options struct {
 }
 
 type Proxy struct {
+	client *client.RegistryClient
 	options *Options
-}
-
-// Auth represents the authentication structure for connecting to a registry.
-// Available options are: BasicAuth, TokenAuth, SillyAuth, NoAuth.
-type Auth interface {
-	// Name returns the name of this authentication type.
-	Name() string
-	
-	// IsNoAuth returns a bool if the authentication type is `NoAuth`.
-	IsNoAuth() bool
-
-	// Configure configures the authentication type for the HTTP client.
-	Configure(headers http.Header) error
-}
-
-type BasicAuth struct {
-	Username string
-	Password string
-}
-
-type NoAuth struct {}
-
-// NewBasicAuth creates a new Auth object being a *BasicAuth object.
-func NewBasicAuth(username string, password string) Auth {
-	return &BasicAuth{
-		Username: username,
-		Password: password,
-	}
-}
-
-func (*BasicAuth) Name() string {
-	return "basic authentication with username + password"
-}
-
-func (*BasicAuth) IsNoAuth() bool {
-	return false
-}
-
-func (b *BasicAuth) Configure(headers http.Header) error {
-	return nil
-}
-
-func NewNoAuth() Auth {
-	return &NoAuth{}
-}
-
-func (*NoAuth) Name() string {
-	return "no authentication provided"
-}
-
-func (*NoAuth) IsNoAuth() bool {
-	return true
-}
-
-func (*NoAuth) Configure(headers http.Header) error {
-	return nil
 }
 
 // NewDefault creates a new *Proxy object with the default options.
@@ -160,20 +105,28 @@ func NewDefault() (*Proxy, error) {
 		port = p
 	}
 
-	client := &http.Client{}
-	auth := NewNoAuth()
+	httpClient := &http.Client{}
+	auth := auth.NewNoAuth()
+	registryClient, err := client.NewRegistryClient(
+		httpClient,
+		false,
+		host,
+		port,
+		&auth,
+	)
+
+	if err != nil {
+		return nil, err
+	}
 
 	proxy := &Proxy{
+		client: registryClient,
 		options: &Options{
 			Host: host,
 			Port: port,
 			Auth: &auth,
-			Client: client,
+			Secure: false,
 		},
-	}
-
-	if err := proxy.TryConnect(); err != nil {
-		return nil, err
 	}
 
 	return proxy, nil
@@ -181,50 +134,26 @@ func NewDefault() (*Proxy, error) {
 
 // New creates a new *Proxy object with custom options.
 func New(options *Options) (*Proxy, error) {
-	proxy := &Proxy{options}
+	if options.Client == nil {
+		options.Client = &http.Client{}
+	}
+	
+	registryClient, err := client.NewRegistryClient(
+		options.Client,
+		options.Secure,
+		options.Host,
+		options.Port,
+		options.Auth,
+	)
 
-	if err := proxy.TryConnect(); err != nil {
+	if err != nil {
 		return nil, err
 	}
 
+	proxy := &Proxy{
+		registryClient,
+		options,
+	}
+
 	return proxy, nil
-}
-
-// TryConnect makes a connection to the registry to check if it's a successful connection.
-func (proxy *Proxy) TryConnect() error {
-	protocol := "http"
-	if proxy.options.Secure {
-		protocol = "https"
-	}
-
-	req, err := http.NewRequest("HEAD", fmt.Sprintf("%s://%s:%d/v2", protocol, proxy.options.Host, proxy.options.Port), nil)
-	if err != nil {
-		return err
-	}
-
-	if proxy.options.Auth != nil {
-		auth := *proxy.options.Auth
-		err = auth.Configure(req.Header)
-		if err != nil {
-			return err
-		}
-	}
-
-	res, err := proxy.options.Client.Do(req)
-	if err != nil {
-		return err
-	}
-
-	if res.StatusCode != 200 {
-		defer res.Body.Close()
-		buf := &bytes.Buffer{}
-
-		if _, err := io.Copy(buf, res.Body); err != nil {
-			return err
-		}
-
-		return fmt.Errorf("received %d, not 200 :: %s", res.StatusCode, buf.String())
-	}
-
-	return nil
 }
