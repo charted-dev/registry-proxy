@@ -84,7 +84,7 @@ type Proxy struct {
 }
 
 // Auth represents the authentication structure for connecting to a registry.
-// Available options are: BasicAuth, TokenAuth, SillyAuth, NoAuth
+// Available options are: BasicAuth, TokenAuth, SillyAuth, NoAuth.
 type Auth interface {
 	// Name returns the name of this authentication type.
 	Name() string
